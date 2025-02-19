@@ -1,0 +1,3 @@
+{
+    "descricao": "Loaded as API: https:\/\/akhaliq-molmo-7b-d-0924.hf.space ✔\nErro ao chamar a API: The upstream Gradio app has raised an exception: You have exceeded your GPU quota (120s requested vs. 103s left). <a style=\"white-space: nowrap;text-underline-offset: 2px;color: var(--body-text-color)\" href=\"https:\/\/huggingface.co\/join\">Create a free account<\/a> to get more usage quota."
+}
