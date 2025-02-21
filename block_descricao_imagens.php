@@ -16,11 +16,33 @@ class block_descricao_imagens extends block_base {
 
         $this->content = new stdClass();
         $this->content->text = '
-            <form action="' . $form_url . '" method="post" enctype="multipart/form-data">
+            <form id="descricao-imagens-form" action="' . $form_url . '" method="post" enctype="multipart/form-data">
                 <label for="imagem">Envie uma imagem:</label>
-                <input type="file" name="imagem" accept="image/*" required>
+                <input type="file" name="imagem" id="imagem" accept="image/*" required>
                 <button type="submit">Enviar</button>
             </form>
+            <div id="descricao-output" style="margin-top:10px;"></div>
+
+            <script>
+                document.getElementById("descricao-imagens-form").addEventListener("submit", function(event) {
+                    event.preventDefault();
+                    var formData = new FormData(this);
+                    var outputDiv = document.getElementById("descricao-output");
+                    outputDiv.innerHTML = "<p>Processando a imagem...</p>";
+
+                    fetch("' . $form_url . '", {
+                        method: "POST",
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        outputDiv.innerHTML = data.descricao ? "<h3>Descrição:</h3><p>" + data.descricao + "</p>" : "<p style=\'color:red;\'>" + data.erro + "</p>";
+                    })
+                    .catch(error => {
+                        outputDiv.innerHTML = "<p style=\'color:red;\'>Erro ao conectar com a API.</p>";
+                    });
+                });
+            </script>
         ';
 
         return $this->content;
