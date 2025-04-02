@@ -1,111 +1,184 @@
 <?php
 namespace local_imagedesc;
 
+use moodle_url;
+
 defined('MOODLE_INTERNAL') || die();
 
 class observers {
 
-    /**
-     * Callback para evento de CRIAÇÃO de post no fórum.
-     *
-     * @param \mod_forum\event\post_created $event
-     */
     public static function forum_post_created($event) {
-        sleep(2); // Aguarda 2 segundos para garantir que o post foi salvo no banco
-        self::update_post_description($event);
+        error_log("[local_imagedesc] Post criado (ID: {$event->objectid}). Nenhuma acao necessaria.");
     }
 
-    /**
-     * Callback para evento de ATUALIZAÇÃO de post no fórum.
-     *
-     * @param \mod_forum\event\post_updated $event
-     */
     public static function forum_post_updated($event) {
+        error_log("[local_imagedesc] Evento de atualizacao de post detectado (ID: {$event->objectid}). Processando...");
         self::update_post_description($event);
     }
 
 
-    public static function file_uploaded($event) {
-        global $DB;
-    
-        // Captura informações do arquivo enviado
-        $fileinfo = $DB->get_record('files', ['id' => $event->objectid]);
-    
-        if (!$fileinfo) {
-            error_log("[local_imagedesc] Arquivo não encontrado para o evento file_uploaded.");
-            return;
-        }
-    
-        // Verifica se é uma imagem
-        $allowedtypes = ['image/jpeg', 'image/png', 'image/gif'];
-        if (!in_array($fileinfo->mimetype, $allowedtypes)) {
-            error_log("[local_imagedesc] O arquivo {$fileinfo->filename} não é uma imagem.");
-            return;
-        }
-    
-        // Adiciona um log para depuração
-        error_log("[local_imagedesc] Upload detectado: {$fileinfo->filename}.");
-    
-        // Agora, tentamos modificar a descrição diretamente na imagem
-        $fileinfo->author = "Imagem enviada por [Nome do Usuário] em " . date('d/m/Y H:i');
-        $DB->update_record('files', $fileinfo);
-    
-        error_log("[local_imagedesc] Descrição alterada para {$fileinfo->filename}.");
-    }
-    
 
-    /**
-     * Função central para modificar a descrição da imagem no post.
-     *
-     * @param \mod_forum\event\post_created|\mod_forum\event\post_updated $event
-     */
+
     private static function update_post_description($event) {
-        global $DB;
+        global $DB, $CFG;
+
+
+        //função geral que junta todas as partes
+
 
         $postid = $event->objectid;
         $post = $DB->get_record('forum_posts', ['id' => $postid], '*', MUST_EXIST);
 
         if (empty($post->message)) {
-            error_log("[local_imagedesc] Post $postid sem mensagem. Nada a alterar.");
+            error_log("[local_imagedesc] Post ID $postid sem mensagem. Nada a alterar.");
             return;
         }
 
-        $originalhtml = $post->message;
-        $newhtml = self::process_images_in_html($originalhtml);
+        error_log("[local_imagedesc] Processando conteudo do post ID $postid...");
 
-        if ($newhtml !== $originalhtml) {
+        // Captura o caminho da imagem no post
+        $imagePath = urldecode(self::extract_image_path($post->message));
+        if (!$imagePath) {
+            error_log("[local_imagedesc] Nenhuma imagem encontrada no post ID $postid.");
+            return;
+        }
+
+        error_log("[local_imagedesc] Imagem encontrada no post ID $postid: $imagePath");
+
+        // Obtem caminho absoluto da imagem no moodledata/filedir/
+        $realImagePath = self::resolve_moodle_image_path($postid, $imagePath);
+        if (!$realImagePath) {
+            error_log("[local_imagedesc] ERRO: Arquivo de imagem nao encontrado.");
+            return;
+        }
+
+        error_log("[local_imagedesc] Caminho real do arquivo: $realImagePath");
+
+        // Enviar para a API intermediária
+        $description = self::fetch_image_description($realImagePath);
+
+        if (!$description) {
+            $description = "Descricao indisponivel";
+        }
+
+        error_log("[local_imagedesc] Descricao retornada pela API: $description");
+
+        // Atualiza a mensagem no banco
+        $newhtml = self::update_image_alt_text($post->message, $description);
+        if ($newhtml !== $post->message) {
             $post->message = $newhtml;
             $DB->update_record('forum_posts', $post);
-            error_log("[local_imagedesc] Descrição alterada no postid $postid.");
+            error_log("[local_imagedesc] Descricao alterada no post ID $postid.");
         } else {
-            error_log("[local_imagedesc] Nenhuma alteração necessária no postid $postid.");
+            error_log("[local_imagedesc] Nenhuma alteracao necessaria no post ID $postid.");
         }
     }
 
-    /**
-     * Processa o HTML para modificar/inserir 'alt' nas imagens.
-     *
-     * @param string $html Conteúdo original.
-     * @return string HTML modificado.
-     */
-    private static function process_images_in_html($html) {
-        $pattern = '/<img\s+([^>]*?)>/i';
+
+
+
+
+
+
+    private static function extract_image_path($html) {
+        if (preg_match('/<img.*?src="@@PLUGINFILE@@\/(.*?)"/i', $html, $matches)) {
+            return $matches[1]; // Retorna apenas o nome do arquivo
+        }
+        return null;
+    }
+
+    private static function resolve_moodle_image_path($postid, $filename) {
+        global $DB, $CFG;
     
-        return preg_replace_callback($pattern, function ($matches) {
-            $imgtag = $matches[0];
+        //Função para encontrar o path da imagem no BD
+
+        // Encontra o arquivo no banco de dados
+        $sql = "SELECT contenthash FROM {files} 
+                WHERE component = 'mod_forum' 
+                AND filearea = 'post' 
+                AND itemid = :postid 
+                AND filename = :filename 
+                ORDER BY timemodified DESC LIMIT 1";
+
+        $file = $DB->get_record_sql($sql, ['postid' => $postid, 'filename' => $filename]);
+
+        if (!$file) {
+            return null;
+        }
+
+        // Caminho real baseado no contenthash
+        $hash = $file->contenthash;
+        $filedir = $CFG->dataroot . "/filedir/" . substr($hash, 0, 2) . "/" . substr($hash, 2, 2) . "/" . $hash;
+
+        return file_exists($filedir) ? $filedir : null;
+    }
+
+
+    private static function update_image_alt_text($html, $description) {
+
+        //Atualiza a descrição do post
+
+        error_log("[local_imagedesc] Atualizando ALT da imagem...");
     
-            if (preg_match('/alt\s*=\s*"[^\"]*"/i', $imgtag)) {
-                $imgtag = preg_replace(
-                    '/alt\s*=\s*"[^"]*"/i',
-                    'alt="Imagem enviada por [Nome do Usuário] em ' . date('d/m/Y H:i') . '"',
-                    $imgtag
-                );
-            } else {
-                $imgtag = rtrim($imgtag, '>') . ' alt="Imagem enviada por [Nome do Usuário] em ' . date('d/m/Y H:i') . '">';
-            }
+        // Substituir o atributo alt existente ou adicionar caso não exista
+        if (preg_match('/<img\s+[^>]*alt="[^"]*"/i', $html)) {
+            $html = preg_replace('/(<img\s+[^>]*alt=")[^"]*(")/i', '$1' . htmlspecialchars($description) . '$2', $html);
+        } else {
+            $html = preg_replace('/(<img\s+[^>]*)(>)/i', '$1 alt="' . htmlspecialchars($description) . '"$2', $html);
+        }
     
-            return $imgtag;
-        }, $html);
+        return $html;
+    }
+    
+
+    private static function fetch_image_description($imagePath) {
+
+        //Função que extrai a descrição da IA
+
+        $apiUrl = "http://localhost:8000/describe-image/";
+        error_log("[local_imagedesc] Enviando imagem para API intermediaria: $imagePath");
+    
+        if (!file_exists($imagePath)) {
+            error_log("[local_imagedesc] ERRO: Arquivo de imagem nao encontrado: $imagePath");
+            return "Descricao indisponivel";
+        }
+    
+        // Definir o caminho temporário para a cópia do arquivo com extensão
+        $tempImagePath = $imagePath . ".png"; // Supondo que seja PNG
+        copy($imagePath, $tempImagePath);
+    
+        $postFields = [
+            'image' => new \CURLFile($tempImagePath, "image/png", basename($tempImagePath))
+        ];
+    
+        $ch = curl_init($apiUrl);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ["Content-Type: multipart/form-data"]);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $postFields);
+    
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+    
+        error_log("[local_imagedesc] Resposta da API intermediaria (Codigo HTTP: {$httpCode}): {$response}");
+    
+        // Apagar o arquivo temporário
+        unlink($tempImagePath);
+    
+        if ($httpCode !== 200) {
+            error_log("[local_imagedesc] Erro na requisicao a API intermediaria. Codigo HTTP: {$httpCode}");
+            return "Descricao indisponivel";
+        }
+    
+        $responseData = json_decode($response, true);
+        if (!isset($responseData['description']) || empty($responseData['description'])) {
+            error_log("[local_imagedesc] Falha ao obter descricao da API intermediaria.");
+            return "Descricao indisponivel";
+        }
+    
+        error_log("[local_imagedesc] Descricao final obtida: {$responseData['description']}");
+        return $responseData['description'];
     }
     
 }
