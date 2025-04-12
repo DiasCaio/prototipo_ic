@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<XMLDB PATH="local/imagedesc/db" VERSION="2025040300" COMMENT="Estrutura inicial do plugin local_imagedesc">
+    <TABLES>
+        <TABLE NAME="local_imagedesc_posts" COMMENT="Posts que já foram processados pelo plugin.">
+            <FIELDS>
+                <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true" />
+                <FIELD NAME="postid" TYPE="int" LENGTH="10" NOTNULL="true" />
+                <FIELD NAME="status" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="pending" />
+                <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" />
+            </FIELDS>
+            <KEYS>
+                <KEY NAME="primary" TYPE="primary" FIELDS="id" />
+                <KEY NAME="postid_fk" TYPE="unique" FIELDS="postid" />
+            </KEYS>
+        </TABLE>
+    </TABLES>
+</XMLDB>
