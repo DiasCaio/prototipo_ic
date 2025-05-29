@@ -14,59 +14,38 @@ class process_pending_posts extends \core\task\scheduled_task {
     }
 
     public function execute() {
-        error_log('[local_imagedesc] Tarefa agendada foi iniciada.');
         global $DB;
+        mtrace('[local_imagedesc] Tarefa agendada iniciada.');
 
-        // Verifica se a tabela local_imagedesc_posts existe.
-        $dbman = $DB->get_manager();
-        $table = new \xmldb_table('local_imagedesc_posts');
-        $hastrackingtable = $dbman->table_exists($table);
-
-        if (!$hastrackingtable) {
-            error_log('[local_imagedesc] Tabela local_imagedesc_posts não existe. A tarefa continuará sem o controle de posts já processados.');
-        }
-
-        error_log('[local_imagedesc] Cron rodando: verificando posts com imagem ainda não processados.');
-        $since = time() - 600; // Ajuste para 3600 se quiser processar posts de até 1 hora atrás.
-
-        // Monta o subselect se a tabela de tracking existir.
-        $subquery = $hastrackingtable ? "AND id NOT IN (SELECT postid FROM {local_imagedesc_posts} WHERE status = 'ok')" : "";
+        $since = time() - 10800;
+        mtrace('[local_imagedesc] Selecionando posts criados apos ' . date('c', $since));
 
         $sql = "SELECT * FROM {forum_posts}
                 WHERE created > :since
-                AND message LIKE '%<img%'
-                AND message LIKE '%@@PLUGINFILE@@%'
-                $subquery";
-
+                  AND message LIKE '%<img%'
+                  AND message LIKE '%@@PLUGINFILE@@%'";
         $posts = $DB->get_records_sql($sql, ['since' => $since]);
+        mtrace('[local_imagedesc] ' . count($posts) . ' posts encontrados para processamento.');
 
+        $processed = [];
         foreach ($posts as $post) {
-            error_log("[local_imagedesc] Processando post ID {$post->id}...");
-            $event = (object)['objectid' => $post->id];
+            $pid = $post->id;
+            if (in_array($pid, $processed)) {
+                mtrace("[local_imagedesc] Aviso: post ID $pid ja processado neste ciclo. Pulando.");
+                continue;
+            }
+            $processed[] = $pid;
+
+            mtrace("[local_imagedesc] ----- Início post ID $pid -----");
+            $event = (object)['objectid' => $pid];
             try {
                 \local_imagedesc\observers::update_post_description($event);
-
-                if ($hastrackingtable) {
-                    $record = (object)[
-                        'postid' => $post->id,
-                        'status' => 'ok',
-                        'timemodified' => time()
-                    ];
-                    $DB->insert_record('local_imagedesc_posts', $record, false);
-                }
             } catch (\Throwable $e) {
-                error_log("[local_imagedesc] ERRO ao processar post ID {$post->id}: " . $e->getMessage());
-                if ($hastrackingtable) {
-                    $record = (object)[
-                        'postid' => $post->id,
-                        'status' => 'erro',
-                        'timemodified' => time()
-                    ];
-                    $DB->insert_record('local_imagedesc_posts', $record, false);
-                }
+                mtrace("[local_imagedesc] ERRO ao processar post ID $pid: " . $e->getMessage());
             }
+            mtrace("[local_imagedesc] ----- Fim post ID $pid -----");
         }
 
-        error_log('[local_imagedesc] Cron finalizado.');
+        mtrace('[local_imagedesc] Tarefa agendada finalizada.');
     }
 }
