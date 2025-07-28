@@ -27,13 +27,11 @@ move_uploaded_file($_FILES['imagem']['tmp_name'], $caminho_imagem);
 
 $json_path = ia_processor::processar_imagem($caminho_imagem);
 
-// Se o script Python falhar, retorne erro
 if (stripos($json_path, "Erro") !== false) {
     echo json_encode(["erro" => $json_path]);
     exit;
 }
 
-// Verifica se o JSON existe e lê o conteúdo
 if (!file_exists($json_path)) {
     echo json_encode(["erro" => "Erro ao gerar a descrição da imagem."]);
     exit;
@@ -42,9 +40,4 @@ if (!file_exists($json_path)) {
 $conteudo_json = file_get_contents($json_path);
 $dados = json_decode($conteudo_json, true);
 
-// Move o JSON para a pasta de respostas
-$novo_caminho_json = $responses_dir . pathinfo($imagem_nome, PATHINFO_FILENAME) . ".json";
-rename($json_path, $novo_caminho_json);
-
-// Retorna a descrição corretamente
 echo json_encode(["descricao" => $dados['descricao'] ?? "Descrição não encontrada."]);

@@ -14,3 +14,7 @@ $string['upload_image'] = 'Enviar Imagem';
 $string['generated_description'] = 'Descrição Gerada';
 $string['no_description'] = 'Não foi possível gerar uma descrição.';
 $string['submit'] = 'Enviar';
+$string['api_url'] = 'Endpoint da API';
+$string['api_url_desc'] = 'URL usada para chamar o serviço de IA.';
+$string['api_key'] = 'Chave da API';
+$string['api_key_desc'] = 'Sua chave da API do Google AI Studio';
